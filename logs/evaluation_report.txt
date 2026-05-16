@@ -1,0 +1,20 @@
+Accuracy:0.995562
+Precision:0.995614
+Recall:0.995556
+F1:0.995545
+
+                  precision    recall  f1-score   support
+
+          Copper     1.0000    0.9867    0.9933        75
+            Iron     1.0000    1.0000    1.0000        75
+            Lead     1.0000    1.0000    1.0000        75
+      Mild Steel     1.0000    0.9733    0.9865        75
+ Stainless Steel     0.9868    1.0000    0.9934        75
+Tool Steel EN 31     1.0000    1.0000    1.0000        75
+            Zinc     1.0000    1.0000    1.0000        76
+        aluminum     0.9868    1.0000    0.9934        75
+           brass     0.9868    1.0000    0.9934        75
+
+        accuracy                         0.9956       676
+       macro avg     0.9956    0.9956    0.9955       676
+    weighted avg     0.9956    0.9956    0.9956       676

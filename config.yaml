@@ -1,0 +1,61 @@
+﻿project_name: metal_classifier
+
+dataset:
+  root_dir: "dataset"
+  classes:
+    - aluminum
+    - brass
+    - Copper
+    - Iron
+    - Lead
+    - Mild Steel
+    - Stainless Steel
+    - Tool Steel EN 31
+    - Zinc
+  image_size: 300
+  train_split: 0.70
+  val_split: 0.15
+  test_split: 0.15
+  random_seed: 42
+
+augmentation:
+  random_rotation_degrees: 30
+  brightness: 0.3
+  contrast: 0.3
+  saturation: 0.1
+  hue: 0.05
+  gaussian_blur_kernel: 3
+  gaussian_noise_std: 0.02
+  perspective_distortion: 0.3
+  random_resized_crop_scale: [0.8, 1.0]
+
+model:
+  architecture: efficientnet_b3
+  pretrained: true
+  dropout: 0.4
+  freeze_backbone_epochs: 5
+
+training:
+  epochs: 60
+  batch_size: 16
+  optimizer: adamw
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  scheduler: cosine
+  scheduler_t_max: 60
+  early_stopping_patience: 15
+  num_workers: 4
+  pin_memory: true
+  mixed_precision: true
+
+paths:
+  models_dir: "models"
+  logs_dir: "logs"
+  best_model: "C:/Users/saksh/OneDrive/Desktop/path/yolov8-live/python projects/Python/Crieya/models/best_model.pth"
+  final_model: "C:/Users/saksh/OneDrive/Desktop/path/yolov8-live/python projects/Python/Crieya/models/final_model.pth"
+
+logging:
+  tensorboard: true
+  csv_log: true
+  print_every_n_batches: 10
+

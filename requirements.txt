@@ -1,0 +1,10 @@
+﻿torch==2.5.1
+torchvision==0.20.1
+scikit-learn
+numpy
+Pillow
+opencv-python-headless
+matplotlib
+plotly
+PyYAML
+streamlit
