@@ -1,174 +1,168 @@
 ﻿import sys
+import time
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 from PIL import Image
-import time
+
 from src.config import cfg
-from src.inference import MetalPredictor, CONFIDENCE_THRESHOLD
+from src.inference import MetalPredictor, InvalidImageError, CONFIDENCE_THRESHOLD
+from src.gradcam import GradCAM, overlay_heatmap
+from src.class_info import validate_class_meta, get_meta
 
-CLASSES     = ["LM-9", "LM 24", "ADC 12"]
-CLASS_COLOR = {"LM-9": "#1A73E8", "LM 24": "#00C6A7", "ADC 12": "#F4A623"}
-CLASS_ICON  = {"LM-9": "🔵", "LM 24": "🟢", "ADC 12": "🟡"}
-CLASS_INFO  = {
-    "LM-9":   "General purpose aluminium casting alloy. Good fluidity and pressure tightness. Widely used in automotive and general engineering castings.",
-    "LM 24":  "High pressure die casting aluminium alloy. Excellent castability and good mechanical properties. Common in complex thin-walled components.",
-    "ADC 12": "Japanese standard aluminium die casting alloy (equivalent to A383). Excellent die castability, used widely in electronic housings and automotive parts.",
-}
-CLASS_SPECS = {
-    "LM-9":   {"Si": "10-13%", "Cu": "<=0.1%",   "Mg": "0.2-0.6%", "Standard": "BS 1490"},
-    "LM 24":  {"Si": "7.5-9.5%","Cu": "3-4%",    "Fe": "<=1.3%",   "Standard": "BS 1490"},
-    "ADC 12": {"Si": "9.6-12%", "Cu": "1.5-3.5%","Fe": "<=1.3%",   "Standard": "JIS H5302"},
-}
-
-st.set_page_config(page_title="Metal Alloy Classifier", page_icon="🔩", layout="wide")
+st.set_page_config(page_title="Metal Classifier", layout="wide")
 
 st.markdown("""
 <style>
-.stApp { background-color: #F8FAFC; }
-.block-container { padding-top: 1.5rem; }
-.metric-card {
-    background: white; border-radius: 12px; padding: 16px 20px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.07); margin-bottom: 12px;
-    border: 1px solid #E8EEF6;
-}
-.result-badge {
-    border-radius: 12px; padding: 20px 24px;
-    margin-bottom: 16px; border-left: 6px solid;
-}
-.bar-wrap {
-    background: #EEF2F7; border-radius: 6px;
-    height: 12px; overflow: hidden; margin-top: 4px;
-}
-section[data-testid="stSidebar"] { background: #0A1628; }
-section[data-testid="stSidebar"] * { color: #C8D8F0 !important; }
+.metric-card {background:white;border-radius:12px;padding:16px 20px;
+  box-shadow:0 2px 8px rgba(0,0,0,0.07);margin-bottom:12px;border:1px solid #E8EEF6;}
+.result-badge {border-radius:12px;padding:20px 24px;margin-bottom:16px;border-left:6px solid;}
+.bar-wrap {background:#EEF2F7;border-radius:6px;height:12px;overflow:hidden;margin-top:4px;}
 </style>
 """, unsafe_allow_html=True)
 
+
 @st.cache_resource(show_spinner="Loading model...")
 def load_predictor(model_path):
-    return MetalPredictor(model_path=model_path)
+    predictor = MetalPredictor(model_path=model_path)
+    validate_class_meta(predictor.class_names)
+    return predictor
+
 
 with st.sidebar:
-    st.markdown("## 🔩 Metal Classifier")
-    st.markdown("---")
-    st.markdown("### ⚙️ Settings")
-    model_path  = st.text_input("Model path", value=cfg.paths.best_model)
-    threshold   = st.slider("Confidence threshold", 0.0, 1.0, float(CONFIDENCE_THRESHOLD), 0.05)
-    st.markdown("---")
-    st.markdown("### 🔘 Display Options")
-    show_scores = st.toggle("Class confidence bars", value=True)
-    show_info   = st.toggle("Alloy description",     value=True)
-    show_specs  = st.toggle("Chemical composition",  value=False)
-    st.markdown("---")
-    st.markdown("### 📦 Supported Classes")
-    for c in CLASSES:
-        color = CLASS_COLOR[c]
-        st.markdown(
-            f'<div style="display:flex;align-items:center;gap:8px;margin:6px 0">'
-            f'<div style="width:12px;height:12px;border-radius:50%;background:{color}"></div>'
-            f'<span style="font-size:14px">{c}</span></div>',
-            unsafe_allow_html=True)
-    st.markdown("---")
-    st.markdown('<p style="font-size:11px;opacity:0.5;text-align:center">Metal Alloy Classifier v2.0<br>EfficientNet-B3</p>', unsafe_allow_html=True)
+    st.markdown("## Metal Classifier")
+    st.markdown("### Settings")
+    model_path = st.text_input("Model path", value=cfg.paths.best_model)
+    threshold = st.slider("Score threshold", 0.0, 1.0, float(CONFIDENCE_THRESHOLD), 0.05)
+    st.markdown("### Display")
+    show_scores = st.toggle("Class scores", value=True)
+    show_info = st.toggle("Class description", value=True)
+    show_cam = st.toggle("Grad-CAM explanation map", value=True)
 
-st.markdown("# 🔩 Metal Alloy Classifier")
-st.markdown("Upload a macro surface image to identify: **LM-9** | **LM 24** | **ADC 12**")
-st.divider()
+st.markdown("# Metal Classifier")
 
 if not Path(model_path).exists():
     st.error(f"Model not found at: `{model_path}`")
-    st.info("Run training first:  `python -m src.train`")
+    st.info("Train first with: `python -m src.train`")
     st.stop()
 
-predictor = load_predictor(model_path)
-uploaded  = st.file_uploader("Upload metal surface image", type=["jpg","jpeg","png","bmp","webp"])
+try:
+    predictor = load_predictor(model_path)
+except ValueError as e:
+    st.error(str(e))
+    st.stop()
 
+with st.sidebar:
+    st.markdown("### Supported classes")
+    for name in predictor.class_names:
+        c = get_meta(name)["color"]
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:8px;margin:4px 0">'
+            f'<div style="width:12px;height:12px;border-radius:50%;background:{c}"></div>'
+            f'<span style="font-size:14px">{name}</span></div>',
+            unsafe_allow_html=True)
+    st.caption(f"Model: {predictor.architecture} | {predictor.image_size[1]}x{predictor.image_size[0]} input")
+
+st.markdown("Upload a macro surface image to classify it into one of: "
+            + ", ".join(predictor.class_names) + ".")
+st.divider()
+
+uploaded = st.file_uploader("Upload metal surface image", type=["jpg", "jpeg", "png", "bmp", "webp"])
 if uploaded is None:
-    c1, c2, c3 = st.columns(3)
-    for col, cls in zip([c1,c2,c3], CLASSES):
-        color = CLASS_COLOR[cls]
-        with col:
-            st.markdown(
-                f'<div class="metric-card" style="text-align:center;border-top:4px solid {color}">'
-                f'<div style="font-size:32px">{CLASS_ICON[cls]}</div>'
-                f'<div style="font-size:18px;font-weight:700;color:{color};margin:8px 0">{cls}</div>'
-                f'<div style="font-size:12px;color:#64748B">{CLASS_INFO[cls][:60]}...</div>'
-                f'</div>', unsafe_allow_html=True)
-    st.info("👆 Upload an image above to start classification")
+    st.info("Upload an image above to start.")
     st.stop()
 
-image = Image.open(uploaded).convert("RGB")
-with st.spinner("🔍 Analysing metal surface..."):
-    t_start = time.time()
-    result  = predictor.predict(image)
-    elapsed = (time.time() - t_start) * 1000
+try:
+    image = Image.open(uploaded)
+    image.load()
+    image = image.convert("RGB")
+except Exception as e:
+    st.error(f"Could not read this file as an image: {e}")
+    st.stop()
 
-label  = result["label"]
-conf   = result["confidence"]
+try:
+    with st.spinner("Analysing..."):
+        t0 = time.time()
+        result = predictor.predict(image)
+        tensor = predictor.preprocess(image)
+        elapsed = (time.time() - t0) * 1000
+except InvalidImageError as e:
+    st.error(str(e))
+    st.stop()
+
+label = result["label"]
+score = result["confidence"]
 scores = result["scores"]
-color  = CLASS_COLOR.get(label, "#888")
-icon   = CLASS_ICON.get(label, "🔩")
-above  = conf >= threshold
+meta = get_meta(label)
+color = meta["color"]
 
-col_img, col_res = st.columns([1,1], gap="large")
+col_img, col_res = st.columns(2, gap="large")
 
 with col_img:
-    st.subheader("📷 Input Image")
-    st.image(image, use_column_width=True, caption=uploaded.name)
-    st.caption(f"Size: {image.width}x{image.height}px  |  Inference: {elapsed:.0f}ms")
+    st.subheader("Input image")
+    st.image(image, use_container_width=True, caption=uploaded.name)
+    st.caption(f"Size: {image.width}x{image.height}px | Inference + preprocess: {elapsed:.0f} ms")
 
 with col_res:
-    st.subheader("🎯 Prediction Result")
+    st.subheader("Prediction")
     st.markdown(
         f'<div class="result-badge" style="background:{color}15;border-left-color:{color}">'
-        f'<div style="display:flex;align-items:center;gap:12px">'
-        f'<span style="font-size:40px">{icon}</span>'
-        f'<div>'
         f'<div style="font-size:32px;font-weight:800;color:{color};line-height:1.1">{label}</div>'
         f'<div style="font-size:15px;color:#555;margin-top:4px">'
-        f'Confidence: <b style="color:{color}">{conf*100:.1f}%</b>'
-        f'&nbsp;|&nbsp;Inference: <b>{elapsed:.0f}ms</b>'
-        f'</div></div></div></div>',
+        f'Model score: <b style="color:{color}">{score*100:.1f}%</b></div></div>',
         unsafe_allow_html=True)
 
-    if above:
-        st.success("✅ High confidence — result is reliable")
+    if score >= threshold:
+        st.success("Score is above the threshold.")
     else:
-        st.warning(f"⚠️ Confidence {conf*100:.1f}% is below threshold ({threshold*100:.0f}%) — try a clearer image")
+        st.warning(f"Score {score*100:.1f}% is below the threshold ({threshold*100:.0f}%). "
+                   "The model is unsure; try a clearer image.")
+    st.caption("Scores are softmax outputs from a model trained with label smoothing, "
+               "so even a certain prediction tops out near 91%. They are not calibrated "
+               "probabilities of being correct.")
 
-    if show_info and label in CLASS_INFO:
+    if show_info and meta["description"]:
         st.markdown(
-            f'<div class="metric-card">'
-            f'<div style="font-size:12px;font-weight:600;color:#64748B;text-transform:uppercase;margin-bottom:6px">About {label}</div>'
-            f'<div style="font-size:14px;color:#334155;line-height:1.6">{CLASS_INFO[label]}</div>'
-            f'</div>', unsafe_allow_html=True)
-
-    if show_specs and label in CLASS_SPECS:
-        specs = CLASS_SPECS[label]
-        rows  = "".join(
-            f'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F0F4F8;font-size:13px">'
-            f'<span style="color:#64748B">{k}</span>'
-            f'<span style="font-weight:600;color:#1E293B">{v}</span></div>'
-            for k, v in specs.items())
-        st.markdown(
-            f'<div class="metric-card">'
-            f'<div style="font-size:12px;font-weight:600;color:#64748B;text-transform:uppercase;margin-bottom:8px">Chemical Composition — {label}</div>'
-            f'{rows}</div>', unsafe_allow_html=True)
+            f'<div class="metric-card"><div style="font-size:12px;font-weight:600;'
+            f'color:#64748B;text-transform:uppercase;margin-bottom:6px">About {label}</div>'
+            f'<div style="font-size:14px;color:#334155;line-height:1.6">{meta["description"]}</div></div>',
+            unsafe_allow_html=True)
 
     if show_scores:
-        st.markdown("**Class Confidence Scores**")
-        for cls, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
-            bar_color = CLASS_COLOR.get(cls, "#888")
-            is_top    = cls == label
+        st.markdown("**Class scores**")
+        for cls, s in sorted(scores.items(), key=lambda x: x[1], reverse=True):
+            bc = get_meta(cls)["color"]
+            is_top = cls == label
             st.markdown(
-                f'<div style="margin-bottom:12px">'
-                f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-                f'<span style="font-size:14px;font-weight:{"700" if is_top else "400"};color:{"#1E293B" if is_top else "#64748B"}">'
-                f'{CLASS_ICON.get(cls,"")} {cls}{"  ✓" if is_top else ""}</span>'
-                f'<span style="font-size:14px;font-weight:700;color:{bar_color}">{score*100:.1f}%</span></div>'
-                f'<div class="bar-wrap">'
-                f'<div style="width:{max(score*100,0.5):.1f}%;background:{bar_color};height:12px;border-radius:6px"></div>'
-                f'</div></div>',
+                f'<div style="margin-bottom:10px">'
+                f'<div style="display:flex;justify-content:space-between;margin-bottom:4px">'
+                f'<span style="font-size:14px;font-weight:{"700" if is_top else "400"}">{cls}</span>'
+                f'<span style="font-size:14px;font-weight:700;color:{bc}">{s*100:.1f}%</span></div>'
+                f'<div class="bar-wrap"><div style="width:{max(s*100,0.5):.1f}%;background:{bc};'
+                f'height:12px;border-radius:6px"></div></div></div>',
                 unsafe_allow_html=True)
+
+if show_cam:
+    st.divider()
+    st.subheader("Grad-CAM explanation map")
+    try:
+        with GradCAM(predictor.model) as g:
+            heatmap = g.generate(tensor, class_idx=result["index"])
+            cam_empty = g.last_cam_empty
+        if cam_empty:
+            st.warning("Grad-CAM produced an empty map for this image, so no overlay is shown.")
+        else:
+            seen = image.resize((predictor.image_size[1], predictor.image_size[0]))
+            overlay = overlay_heatmap(seen, heatmap)
+            c1, c2 = st.columns(2, gap="large")
+            c1.image(seen, use_container_width=True, caption="Image as seen by the model")
+            c2.image(overlay, use_container_width=True, caption=f"Grad-CAM for: {label}")
+        st.caption(
+            "This is a visual explanation map, not proof of what the model relies on. "
+            "Each map is normalised per image, so a bright spot always appears. "
+            "On the validation set, map peaks concentrated near the top edge, but a simple "
+            "band-masking test changed few predictions, so the reason is unresolved.")
+    except Exception as e:
+        st.error(f"Grad-CAM failed: {e}")

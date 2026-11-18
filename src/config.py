@@ -1,32 +1,37 @@
-﻿import yaml
+import yaml
 from pathlib import Path
 from types import SimpleNamespace
 
-def _dict_to_namespace(d):
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _to_namespace(d):
     ns = SimpleNamespace()
     for key, value in d.items():
-        if isinstance(value, dict):
-            setattr(ns, key, _dict_to_namespace(value))
-        else:
-            setattr(ns, key, value)
+        setattr(ns, key, _to_namespace(value) if isinstance(value, dict) else value)
     return ns
 
+
+def _resolve(p):
+    p = Path(p)
+    return str(p if p.is_absolute() else PROJECT_ROOT / p)
+
+
 def load_config(config_path=None):
-    if config_path is None:
-        config_path = Path(__file__).resolve().parent.parent / "config.yaml"
-    config_path = Path(config_path).resolve()
+    config_path = Path(config_path) if config_path else PROJECT_ROOT / "config.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
-    ns = _dict_to_namespace(raw)
-    project_root = config_path.parent
-    ns.paths.models_dir   = str(project_root / "models")
-    ns.paths.logs_dir     = str(project_root / "logs")
-    ns.paths.best_model   = str(project_root / "models" / "best_model.pth")
-    ns.paths.final_model  = str(project_root / "models" / "final_model.pth")
-    ns.paths.class_labels = str(project_root / "models" / "class_labels.json")
-    ns.dataset.root_dir   = str(project_root / "dataset")
+    ns = _to_namespace(raw)
+    ns.dataset.root_dir = _resolve(ns.dataset.root_dir)
+    ns.paths.models_dir = _resolve(ns.paths.models_dir)
+    ns.paths.logs_dir = _resolve(ns.paths.logs_dir)
+    models_dir = Path(ns.paths.models_dir)
+    ns.paths.best_model = str(models_dir / ns.paths.best_model_name)
+    ns.paths.last_checkpoint = str(models_dir / ns.paths.last_checkpoint_name)
+    ns.paths.class_labels = str(models_dir / ns.paths.class_labels_name)
     return ns
+
 
 cfg = load_config()
