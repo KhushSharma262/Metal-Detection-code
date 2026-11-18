@@ -1,5 +1,11 @@
 {
-  "0": "ADC 12",
-  "1": "LM 24",
-  "2": "LM-9"
+  "0": "Aluminium",
+  "1": "Brass",
+  "2": "Copper",
+  "3": "Iron",
+  "4": "Lead",
+  "5": "Mild Steel",
+  "6": "Stainless Steel",
+  "7": "Tool Steel EN 31",
+  "8": "Zinc"
 }
